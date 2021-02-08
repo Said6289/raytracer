@@ -43,12 +43,6 @@ typedef struct {
 } raycaster;
 
 typedef struct {
-} camera;
-
-typedef struct {
-} mat3;
-
-typedef struct {
     v3 vertex0;
     v3 vertex1;
     v3 vertex2;
@@ -82,15 +76,7 @@ typedef struct {
 } scene;
 
 typedef struct {
-} mesh;
-
-typedef struct {
-} face;
-
-typedef struct {
     material *Material;
-    mesh *Mesh;
-    face Face;
     v3 Point;
     v3 Normal;
 } hit;
@@ -106,8 +92,6 @@ typedef struct {
     v3 n0;
     v3 n1;
     v3 n2;
-
-    mat3 normalMatrix;
 } regs;
 
 typedef struct {

@@ -1,7 +1,7 @@
 #include "ray.h"
 
 void
-write_ppm(char *filename, uint32_t width, uint32_t height, uint32_t *pixels)
+write_ppm(const char *filename, uint32_t width, uint32_t height, uint32_t *pixels)
 {
     FILE *file = fopen(filename, "w");
     fprintf(file, "P3\n");
@@ -17,7 +17,7 @@ write_ppm(char *filename, uint32_t width, uint32_t height, uint32_t *pixels)
 }
 
 static void
-RaycasterSetFromCamera(raycaster *Raycaster, v2 PixP, camera *Camera)
+RaycasterSetFromCamera(raycaster *Raycaster, v2 PixP)
 {
     Raycaster->Origin.x = 0.0f;
     Raycaster->Origin.y = 0.0f;
@@ -243,7 +243,6 @@ OutputXY(image_data *ImageData, int X, int Y, v3 PixC)
 static void
 RaytraceTile(
     image_data *ImageData,
-    camera *Camera,
     scene *Scene,
     int LightCount,
     light *Lights,
@@ -293,7 +292,7 @@ RaytraceTile(
                 float PixX = PixCenterX + OffsetX;
                 float PixY = PixCenterY + OffsetY;
 
-                RaycasterSetFromCamera(&Raycaster, V2(PixX, PixY), Camera);
+                RaycasterSetFromCamera(&Raycaster, V2(PixX, PixY));
 
                 NextRay.Origin = Raycaster.Origin;
                 NextRay.Direction = Raycaster.Direction;
@@ -438,7 +437,6 @@ main(int ArgCount, char **Args)
     Lights[2] = Light2;
     Lights[3] = Light3;
 
-    camera Camera = {};
     scene Scene = {};
 
     Scene.SphereCount = ArrayCount(Spheres);
@@ -450,11 +448,10 @@ main(int ArgCount, char **Args)
     image_data ImageData = {};
     ImageData.Width = 512;
     ImageData.Height = 512;
-    ImageData.Pixels = malloc(ImageData.Width * ImageData.Height * sizeof(uint32_t));
+    ImageData.Pixels = (uint32_t *)malloc(ImageData.Width * ImageData.Height * sizeof(uint32_t));
 
     RaytraceTile(
             &ImageData,
-            &Camera,
             &Scene,
             ArrayCount(Lights),
             Lights,
