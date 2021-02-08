@@ -49,6 +49,9 @@ typedef struct {
 } mat3;
 
 typedef struct {
+    v3 vertex0;
+    v3 vertex1;
+    v3 vertex2;
 } triangle;
 
 typedef struct {
@@ -138,6 +141,14 @@ static v2 V2(f32 x, f32 y) {
 
 static f32 dot(v3 a, v3 b) {
   f32 result = a.x * b.x + a.y * b.y + a.z * b.z;
+  return result;
+}
+
+static v3 cross(v3 a, v3 b) {
+  v3 result;
+  result.x = a.y*b.z - a.z*b.y;
+  result.y = a.z*b.x - a.x*b.z;
+  result.z = a.x*b.y - a.y*b.x;
   return result;
 }
 

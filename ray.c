@@ -26,6 +26,45 @@ RaycasterSetFromCamera(raycaster *Raycaster, v2 PixP, camera *Camera)
     Raycaster->Direction = normalize(subtract(V3(PixP.x, PixP.y, 5.0f), Raycaster->Origin));
 }
 
+static
+bool RayIntersectsTriangle(
+    v3 rayOrigin, 
+    v3 rayVector, 
+    triangle inTriangle,
+    float *d)
+{
+    const float EPSILON = 0.0001f;
+    v3 vertex0 = inTriangle.vertex0;
+    v3 vertex1 = inTriangle.vertex1;  
+    v3 vertex2 = inTriangle.vertex2;
+    v3 edge1, edge2, h, s, q;
+    float a,f,u,v;
+    edge1 = subtract(vertex1, vertex0);
+    edge2 = subtract(vertex2, vertex0);
+    h = cross(rayVector, edge2);
+    a = dot(edge1, h);
+    if (a > -EPSILON && a < EPSILON)
+        return false;    // This ray is parallel to this triangle.
+    f = 1.0/a;
+    s = subtract(rayOrigin, vertex0);
+    u = f * dot(s, h);
+    if (u < 0.0 || u > 1.0)
+        return false;
+    q = cross(s, edge1);
+    v = f * dot(rayVector, q);
+    if (v < 0.0 || u + v > 1.0)
+        return false;
+    // At this stage we can compute t to find out where the intersection point is on the line.
+    float t = f * dot(edge2, q);
+    if (t > EPSILON) // ray intersection
+    {
+        *d = t;
+        return true;
+    }
+    else // This means that there is a line intersection but not a ray intersection.
+        return false;
+}
+
 static bool
 IntersectScene(raycaster *Raycaster, scene *Scene, hit *Hit)
 {
@@ -85,25 +124,95 @@ IntersectScene(raycaster *Raycaster, scene *Scene, hit *Hit)
         }
     }
 
+    { // TODO(said): This was just hacked in to get a tetrahedron in there
+        v3 _V1 = V3(1, 0, 0);
+        v3 _V2 = V3(0, 1, 0);
+        v3 _V3 = V3(0, 0, 1);
+        v3 _V4 = V3(0, 0, 0);
+
+        v3 off = V3(-2.2, 2.2f, 0.5);
+        _V1 = add(_V1, off);
+        _V2 = add(_V2, off);
+        _V3 = add(_V3, off);
+        _V4 = add(_V4, off);
+
+        triangle T[4];
+
+        T[0].vertex0 = _V2;
+        T[0].vertex1 = _V4;
+        T[0].vertex2 = _V3;
+
+        T[1].vertex0 = _V4;
+        T[1].vertex1 = _V2;
+        T[1].vertex2 = _V1;
+
+        T[2].vertex0 = _V3;
+        T[2].vertex1 = _V1;
+        T[2].vertex2 = _V2;
+
+        T[3].vertex0 = _V1;
+        T[3].vertex1 = _V3;
+        T[3].vertex2 = _V4;
+
+        for (int i = 0; i < 4; ++i) {
+            f32 d = FLT_MAX;
+
+            if (RayIntersectsTriangle(Raycaster->Origin, Raycaster->Direction, T[i], &d)) {
+                if (d < MinHitD) {
+                    DidHit = true;
+
+                    v3 edge1 = subtract(T[i].vertex1, T[i].vertex0);
+                    v3 edge2 = subtract(T[i].vertex2, T[i].vertex0);
+
+                    Hit->Point = add(Raycaster->Origin, scale(Raycaster->Direction, d));
+                    Hit->Normal = normalize(cross(edge1, edge2));
+                    Hit->Material = Scene->Spheres[0].Material;
+                }
+            }
+        }
+    }
+
     return DidHit;
 }
 
 static v3
-GammaToLinear(v3 C)
+_GammaToLinear(v3 C)
 {
     return C;
 }
 
-static v3
-LinearToGamma(v3 C)
+static float
+LinearToSRGB_Float(float L)
 {
-    return C;
+    if (L < 0.0f) {
+        L = 0.0f;
+    } else if (L > 1.0f) {
+        L = 1.0f;
+    }
+    
+    f32 S = L*12.92f;
+    if (L > 0.0031308f) {
+        S = 1.055f*pow(L, 1.0f/2.4f) - 0.055f;
+    }
+    
+    return S;
+}
+
+static v3
+LinearToSRGB(v3 L)
+{
+    v3 Result;
+    Result.x = LinearToSRGB_Float(L.x);
+    Result.y = LinearToSRGB_Float(L.y);
+    Result.z = LinearToSRGB_Float(L.z);
+    return Result;
 }
 
 static v3
 Reflect(v3 Incident, v3 Normal)
 {
-    v3 Result = add(Incident, scale(Normal, 2.0f * dot(Incident, Normal)));
+    v3 Result = subtract(Incident, scale(Normal, 2.0f * dot(Incident, Normal)));
+    Result = normalize(Result);
     return Result;
 }
 
@@ -205,7 +314,7 @@ RaytraceTile(
                         if (Mat) {
                             v3 Normal = Hit.Normal;
 
-                            v3 MatC = GammaToLinear(Mat->Color);
+                            v3 MatC = Mat->Color;
 
                             if (Mat->Mirror) {
                                 NextRay.Origin = Hit.Point;
@@ -217,7 +326,7 @@ RaytraceTile(
                             for (int LightI = 0; LightI < LightCount; ++LightI) {
                                 light *Light = Lights + LightI;
 
-                                v3 LightC = GammaToLinear(Light->Color);
+                                v3 LightC = Light->Color;
                                 v3 LightP = Light->Position;
                                 v3 LightRay = subtract(LightP, Hit.Point);
                                 v3 LightRayN = normalize(LightRay);
@@ -232,7 +341,11 @@ RaytraceTile(
 
                                     float Lambert = Clamp(0, dot(LightRayN, Normal), 1);
                                     float Specular = Clamp(0, dot(RefRay, ViewRay), 1);
-                                    Specular = powf(Specular, Mat->Shininess);
+                                    if (Mat->Shininess) {
+                                        Specular = powf(Specular, Mat->Shininess);
+                                    } else {
+                                        Specular = 0;
+                                    }
 
                                     v3 LambertC = MatC;
                                     if (CalcDiffuse) {
@@ -240,7 +353,7 @@ RaytraceTile(
                                     }
                                     v3 SpecularC = scale(V3(1, 1, 1), Specular);
 
-                                    v3 PhongC = LambertC;
+                                    v3 PhongC = add(LambertC, SpecularC);
                                     // TODO(said): Finish specular lighting
 
                                     v3 C = hadamard(LightC, PhongC);
@@ -255,7 +368,7 @@ RaytraceTile(
 
                             FinalC = scale(FinalC, MirrorAttenuation);
 
-                            if (!UseMirrors || !Mat->Mirror) {
+                            if (!Mat->Mirror) {
                                 SampleC = add(SampleC, FinalC);
                                 break; // bounce loop
                             } else {
@@ -273,7 +386,7 @@ RaytraceTile(
                 PixC = add(PixC, scale(SampleC, 1.0f / RaysPerPixel));
             }
 
-            PixC = LinearToGamma(PixC);
+            PixC = LinearToSRGB(PixC);
             OutputXY(ImageData, X, Y, PixC);
         }
     }
@@ -283,39 +396,41 @@ int
 main(int ArgCount, char **Args)
 {
     material Materials[] = {
-        {{1.0f, 0.5f, 0.0f}, false, 0.0f, 0.0f},
-        {{1.0f, 1.0f, 1.0f}, false, 0.0f, 0.0f},
+        {{0.0f, 0.2f, 0.21f}, false, 0.0f, 0.0f},
+        {{0.98f, 0.44f, 0.33f}, false, 0.0f, 0.0f},
+        {{1.0f, 0.63f, 0.3f}, false, 40.0f, 0.0f},
+        {{1.0f, 1.0f, 1.0f}, true, 100.0f, 0.4f},
     };
 
     sphere Spheres[] = {
-        {V3( 0.0f, 1.0f, 0.0f), 1.0f, &Materials[0]},
-        {V3(-3.0f, 1.0f, 0.0f), 1.0f, &Materials[0]},
-        {V3( 3.0f, 1.0f, 0.0f), 1.0f, &Materials[0]},
+        {V3( 0.3f, 2.0f, 1.4f), 1.0f, &Materials[0]},
+        {V3(-3.0f, 1.0f, 0.0f), 1.0f, &Materials[1]},
+        {V3( 3.0f, 1.0f, 0.4f), 1.0f, &Materials[2]},
     };
 
     plane Planes[] = {
-        {-1.0f, V3(0.0f, 1.0f, 0.0f), &Materials[1]},
+        {-1.0f, V3(0.0f, 1.0f, 0.0f), &Materials[3]},
     };
 
     light Light0 = {};
     Light0.Position = V3(3, 3, 1);
-    Light0.Color = V3(0, 1, 0);
-    Light0.Intensity = 3.0f;
+    Light0.Color = V3(1, 1, 1);
+    Light0.Intensity = 0.3f;
 
     light Light1 = {};
-    Light1.Position = V3(-3, 0.1f, 3);
-    Light1.Color = V3(1, 0, 1);
+    Light1.Position = V3(3, 5.0f, 0);
+    Light1.Color = V3(1, 1, 1);
     Light1.Intensity = 1.0f;
 
     light Light2 = {};
-    Light2.Position = V3(3, 0.1f, 3);
+    Light2.Position = V3(-3, 0.1f, 3);
     Light2.Color = V3(1, 1, 1);
-    Light2.Intensity = 1.0f;
+    Light2.Intensity = 0.2f;
 
     light Light3 = {};
-    Light3.Position = V3(0, 0.5f, 3);
-    Light3.Color = V3(1, 0, 0);
-    Light3.Intensity = 2.0f;
+    Light3.Position = V3(0, 0, 6);
+    Light3.Color = V3(1, 1, 1);
+    Light3.Intensity = 3.0f;
 
     light Lights[4];
     Lights[0] = Light0;
@@ -346,7 +461,7 @@ main(int ArgCount, char **Args)
             0, 0,
             ImageData.Width, ImageData.Height,
             2,
-            0,
+            1,
             true,
             true,
             true,
